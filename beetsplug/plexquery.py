@@ -22,6 +22,13 @@ from plexapi.server import PlexServer
 
 from beetsplug import utils as utils
 
+try:
+    from beets.dbcore.pathutils import normalize_path_for_db
+except ImportError:  # beets < 2.10 stores absolute paths
+
+    def normalize_path_for_db(path):
+        return path
+
 
 def get_protocol(secure: bool) -> str:
     if secure:
@@ -275,7 +282,8 @@ class PlexPlaylistItemQuery(dbcore.query.InQuery):
                     )
 
             self.pattern = [
-                dbcore.query.BLOB_TYPE(util.bytestring_path(p)) for p in track_paths
+                dbcore.query.BLOB_TYPE(normalize_path_for_db(util.bytestring_path(p)))
+                for p in track_paths
             ]
 
         except utils.NotFound as e:
