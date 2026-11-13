@@ -9,10 +9,9 @@ Put something like the following in your config.yaml to configure:
 """
 
 import os
-from pathlib import Path
-
 import beets
 from beets import dbcore, logging, plugins, ui, util
+from beets.library import Album
 from plexapi import exceptions
 from plexapi.audio import Track
 from plexapi.library import LibrarySection
@@ -219,15 +218,17 @@ def get_beets_paths_from_plex_tracks(
             translated_path = translated_path.replace(
                 decoded_plex_dir, decoded_beets_dir, 1
             )
-            logger.debug(f"Plex path: {plex_path!r} -> {translated_path!r}")
+            logger.debug("Plex path: {!r} -> {!r}", plex_path, translated_path)
         else:
             # If no mapping or path doesn't start with plex_dir, use original Plex path
-            logger.debug(f"Plex path: {plex_path!r}")
+            logger.debug("Plex path: {!r}", plex_path)
 
         if not os.path.exists(translated_path):
-            raise utils.NotFound(
-                f"Translated path '{translated_path!r}' does not exist on the filesystem. Skipping."
+            logger.warning(
+                "Translated path {!r} does not exist on the filesystem. Skipping.",
+                translated_path,
             )
+            continue
 
         track_paths.append(translated_path)
 
@@ -244,6 +245,11 @@ class PlexPlaylistItemQuery(dbcore.query.InQuery):
         Initializes the query by fetching items from a Plex playlist.
         The 'pattern' argument here is expected to be the Plex playlist name.
         """
+
+        # Absolute library paths, used when beets filters in Python (`match`).
+        self.paths: set[bytes] = set()
+        # Database representation of the same paths, used in SQL (`clause`).
+        self.pattern = []
 
         try:
             plex = get_plex_server(
@@ -265,45 +271,50 @@ class PlexPlaylistItemQuery(dbcore.query.InQuery):
                 library_section_key,
             )
 
-            track_paths: list[Path] = [
-                Path(p).expanduser().resolve()
+            # Normalise the same way beets does for item paths.
+            self.paths = {
+                util.normpath(p)
                 for p in get_beets_paths_from_plex_tracks(
                     tracks,
                     beets.config["directory"].as_filename(),
                     beets.config["plexquery"]["plex_dir"].get(),
                     self._log,
                 )
-            ]
+            }
 
-            for track_path in track_paths:
-                if not track_path.exists():
-                    self._log.warning(
-                        f"Path '{str(track_path)!r}' resolved by pathlib does not exist."
-                    )
-
+            # beets >= 2.10 stores library paths relative to the music directory.
             self.pattern = [
-                dbcore.query.BLOB_TYPE(normalize_path_for_db(util.bytestring_path(p)))
-                for p in track_paths
+                dbcore.query.BLOB_TYPE(normalize_path_for_db(p)) for p in self.paths
             ]
 
         except utils.NotFound as e:
             self._log.warning(
-                f"NotFound exemption attempting to build PlexPlaylistItemQuery: {e}"
+                "NotFound exemption attempting to build PlexPlaylistItemQuery: {}", e
             )
         except utils.ValueError as e:
             self._log.error(
-                f"ValueError exemption attempting to build PlexPlaylistItemQuery: {e}"
+                "ValueError exemption attempting to build PlexPlaylistItemQuery: {}", e
             )
         except utils.UnhandledError as e:
             self._log.error(
-                f"UnhandledError exemption attempting to build PlexPlaylistItemQuery: {e}"
+                "UnhandledError exemption attempting to build PlexPlaylistItemQuery: {}", e
             )
         except Exception as e:
             self._log.error(
-                f"An unexpected error occurred attempting to build PlexPlaylistItemQuery': {e}",
+                "An unexpected error occurred attempting to build PlexPlaylistItemQuery: {}",
+                e,
             )
 
         super().__init__("path", self.pattern, fast=True)
+
+    def match(self, obj) -> bool:
+        """Python-side check, used when beets cannot run the whole query in SQL
+        (for example when it is combined with a flexible-attribute query).
+        Compares absolute paths; albums match if any of their items do.
+        """
+        if isinstance(obj, Album):
+            return any(item.path in self.paths for item in obj.items())
+        return obj.path in self.paths
 
 
 class PlexQueryPlugin(plugins.BeetsPlugin):
@@ -327,6 +338,7 @@ class PlexQueryPlugin(plugins.BeetsPlugin):
                 "host": "localhost",
                 "port": 32400,
                 "token": "",
+                "library_name": "Music",
                 "secure": False,
             }
         )
@@ -383,17 +395,18 @@ class PlexQueryPlugin(plugins.BeetsPlugin):
 
         except utils.NotFound as e:
             self._log.warning(
-                f"NotFound exemption attempting to build PlexQueryPlugin: {e}"
+                "NotFound exemption attempting to build PlexQueryPlugin: {}", e
             )
         except utils.ValueError as e:
             self._log.error(
-                f"ValueError exemption attempting to build PlexQueryPlugin: {e}"
+                "ValueError exemption attempting to build PlexQueryPlugin: {}", e
             )
         except utils.UnhandledError as e:
             self._log.error(
-                f"UnhandledError exemption attempting to build PlexQueryPlugin: {e}"
+                "UnhandledError exemption attempting to build PlexQueryPlugin: {}", e
             )
         except Exception as e:
             self._log.error(
-                f"An unexpected error occurred attempting to build PlexQueryPlugin': {e}",
+                "An unexpected error occurred attempting to build PlexQueryPlugin: {}",
+                e,
             )
