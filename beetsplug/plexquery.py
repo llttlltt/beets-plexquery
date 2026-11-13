@@ -19,7 +19,7 @@ from plexapi.media import Media, MediaPart
 from plexapi.playlist import Playlist
 from plexapi.server import PlexServer
 
-from beetsplug import utils as utils
+from beetsplug import plexquery_utils as utils
 
 try:
     from beets.dbcore.pathutils import normalize_path_for_db
