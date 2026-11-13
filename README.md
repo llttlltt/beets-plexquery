@@ -5,7 +5,7 @@
 Firstly, install `beets` with `plexquery` extra:
 
 ```console
-pip install git+https://github.com/Elliott-Liu/beets-plexquery.git
+pip install git+https://github.com/llttlltt/beets-plexquery.git
 ```
 
 To use it, enable the `plexquery` plugin in your configuration (see
